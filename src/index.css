@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* base tokens / fallback values */
+:root {
+  --color-primary: 34 197 94; /* green (r g b) */
+  --color-bg: 255 255 255;
+  --color-surface: 249 250 251;
+  --color-text: 17 24 39;
+  --color-muted: 107 114 128;
+  --transition-normal: 200ms;
+}
+
+/* dark theme tokens */
+[data-theme="dark"] {
+  --color-primary: 16 185 129;
+  --color-bg: 17 24 39;
+  --color-surface: 30 41 59;
+  --color-text: 243 244 246;
+  --color-muted: 148 163 184;
+}
+
+/* example custom theme (solar) */
+[data-theme="solar"] {
+  --color-primary: 245 158 11;
+  --color-bg: 254 247 237;
+  --color-surface: 255 250 240;
+  --color-text: 34 34 34;
+  --color-muted: 120 111 74;
+}
+
+/* utility to smoothly animate color changes */
+.theme-transition * {
+  transition: background-color var(--transition-normal),
+    color var(--transition-normal), border-color var(--transition-normal);
+}
+
+/* small accessibility helper for reduced motion users */
+@media (prefers-reduced-motion: reduce) {
+  .theme-transition * {
+    transition: none !important;
+  }
+}
+
+/* Minimal layout defaults */
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-text));
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial;
+}
