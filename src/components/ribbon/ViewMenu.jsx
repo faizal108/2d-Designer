@@ -1,27 +1,52 @@
-import { useContext } from "react";
-import { SettingsContext } from "../../contexts/SettingsContext";
+import React, { useContext } from "react";
+import { ViewContext } from "../../contexts/ViewContext";
 
 export default function ViewMenu() {
-  const { settings, updateSetting } = useContext(SettingsContext);
+  const {
+    showGrid,
+    setShowGrid,
+    showPoints,
+    setShowPoints,
+    algorithm,
+    setAlgorithm,
+  } = useContext(ViewContext);
 
   return (
-    <div className="flex gap-4 items-center">
-      <label className="flex items-center gap-2">
+    <div className="flex items-center gap-6">
+      {/* Grid */}
+      <label className="flex items-center gap-2 cursor-pointer">
         <input
           type="checkbox"
-          checked={settings.gridEnabled}
-          onChange={(e) => updateSetting("gridEnabled", e.target.checked)}
+          checked={showGrid}
+          onChange={(e) => setShowGrid(e.target.checked)}
+          className="w-4 h-4 accent-primary"
         />
-        Show Grid
+        <span className="text-sm">Show Grid</span>
       </label>
 
-      <label className="flex items-center gap-2">
+      {/* Points */}
+      <label className="flex items-center gap-2 cursor-pointer">
         <input
           type="checkbox"
-          checked={settings.snapToPoint}
-          onChange={(e) => updateSetting("snapToPoint", e.target.checked)}
+          checked={showPoints}
+          onChange={(e) => setShowPoints(e.target.checked)}
+          className="w-4 h-4 accent-primary"
         />
-        Snap to Point
+        <span className="text-sm">Show Points</span>
+      </label>
+
+      {/* Algo select */}
+      <label className="flex items-center gap-2 text-sm">
+        Mode:
+        <select
+          value={algorithm}
+          onChange={(e) => setAlgorithm(e.target.value)}
+          className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm"
+        >
+          <option value="linear">Linear</option>
+          <option value="curved">Curve Detect</option>
+          <option value="compare">Compare Mode</option>
+        </select>
       </label>
     </div>
   );
