@@ -9,6 +9,8 @@ export default function FloatingMenu() {
     setShowPoints,
     algorithm,
     setAlgorithm,
+    curveLevel,
+    setCurveLevel
   } = useContext(ViewContext);
 
   const [open, setOpen] = useState(true);
@@ -23,14 +25,16 @@ export default function FloatingMenu() {
     <div className="absolute top-4 left-4 z-50 bg-gray-900/95 text-white p-3 rounded-lg shadow-xl border border-gray-700 w-64">
       <div className="flex justify-between items-center">
         <span className="font-semibold text-sm">Workspace Controls</span>
-        <button onClick={() => setOpen(!open)} className="text-xs opacity-60 hover:opacity-100">
+        <button
+          onClick={() => setOpen(!open)}
+          className="text-xs opacity-60 hover:opacity-100"
+        >
           {open ? "Hide" : "Show"}
         </button>
       </div>
 
       {open && (
         <div className="mt-3 flex flex-col gap-4">
-
           {/* Zoom controls */}
           <div>
             <div className="text-xs mb-1 opacity-70">Zoom</div>
@@ -42,7 +46,7 @@ export default function FloatingMenu() {
                 +
               </button>
               <button
-                onClick={() => dispatch("zoomBy", { factor: 0.80 })}
+                onClick={() => dispatch("zoomBy", { factor: 0.8 })}
                 className="px-2 py-1 rounded bg-gray-700"
               >
                 −
@@ -97,6 +101,21 @@ export default function FloatingMenu() {
             </select>
           </div>
 
+          {/* Curve Smoothing */}
+          <div>
+            <div className="text-xs opacity-70 mb-1">
+              Curve Correction Level
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="4"
+              value={curveLevel}
+              onChange={(e) => setCurveLevel(Number(e.target.value))}
+              className="w-full"
+            />
+            <div className="text-xs opacity-60">Level: {curveLevel}</div>
+          </div>
         </div>
       )}
     </div>

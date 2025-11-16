@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { SceneContext } from "../../contexts/SceneContext";
 import { ViewContext } from "../../contexts/ViewContext";
-import { renderScene } from "./RenderCanvas";
+import { renderScene } from "./RenderScene";
 import FloatingMenu from "./FloatingControls";
 
 /**
@@ -23,7 +23,7 @@ export default function Workspace() {
   const rafRef = useRef(null);
 
   const { points, setAllPoints } = useContext(SceneContext);
-  const { showGrid, showPoints, algorithm } = useContext(ViewContext);
+  const { showGrid, showPoints, algorithm, curveLevel } = useContext(ViewContext);
 
   // camera stored in state so UI can react if needed; but we batch changes to avoid floods
   const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
@@ -231,6 +231,7 @@ export default function Workspace() {
             }
             ctx.restore();
           },
+          curveLevel 
         }
       );
 
