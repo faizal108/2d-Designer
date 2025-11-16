@@ -11,11 +11,16 @@ export function ViewProvider({ children }) {
   const [algorithm, setAlgorithm] = useState(() =>
     getLocal("drawAlgo", "linear")
   );
-  // linear | curved | compare
+  // Smoothness level for curved lines
+  const [curveLevel, setCurveLevel] = useState(() => getLocal("curveLevel", 1));
 
+  // linear | curved | compare
   useEffect(() => setLocal("showGrid", showGrid), [showGrid]);
   useEffect(() => setLocal("showPoints", showPoints), [showPoints]);
   useEffect(() => setLocal("drawAlgo", algorithm), [algorithm]);
+
+  // Smoothness level for curved lines
+  useEffect(() => setLocal("curveLevel", curveLevel), [curveLevel]);
 
   return (
     <ViewContext.Provider
@@ -26,6 +31,8 @@ export function ViewProvider({ children }) {
         setShowPoints,
         algorithm,
         setAlgorithm,
+        curveLevel,
+        setCurveLevel
       }}
     >
       {children}
