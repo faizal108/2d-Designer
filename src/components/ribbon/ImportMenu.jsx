@@ -1,8 +1,8 @@
-import React, { useState, useContext } from "react";
-import Modal from "../ui/Modal";
+import React, { useState } from "react";
 import IconButton from "../ui/IconButton";
-import { SceneContext } from "../../contexts/SceneContext";
-import { parsePoints } from "../../utils/parsePoints";
+import FileImportModal from "../modals/import/FileImportModal";
+import PointsImportModal from "../modals/import/PointsImportModal";
+import StreamImportModal from "../modals/import/StreamImportModal";
 
 const IconImport = () => (
   <svg
@@ -18,112 +18,42 @@ const IconImport = () => (
 );
 
 export default function ImportMenu() {
-  const [demoOpen, setDemoOpen] = useState(false);
-  const [pointsOpen, setPointsOpen] = useState(false);
-  const { addPoints } = useContext(SceneContext);
-  const [text, setText] = useState("");
-  const [error, setError] = useState("");
-
-  const onImportPoints = () => {
-    try {
-      const parsed = parsePoints(text);
-      addPoints(parsed);
-      setPointsOpen(false);
-      setText("");
-      setError("");
-    } catch (e) {
-      setError(String(e.message || e));
-    }
-  };
+  const [openFile, setOpenFile] = useState(false);
+  const [openPoints, setOpenPoints] = useState(false);
+  const [openStream, setOpenStream] = useState(false);
 
   return (
-    <div className="flex items-center gap-2">
-      <IconButton
-        icon={<IconImport />}
-        label="Import File"
-        tooltip="Import file (demo)"
-        onClick={() => setDemoOpen(true)}
+    <>
+      <div className="flex items-center gap-2">
+        <IconButton
+          icon={<IconImport />}
+          label="Import File"
+          tooltip="Import file"
+          onClick={() => setOpenFile(true)}
+        />
+        <IconButton
+          icon={<IconImport />}
+          label="Import Points"
+          tooltip="Paste points"
+          onClick={() => setOpenPoints(true)}
+        />
+        <IconButton
+          icon={<IconImport />}
+          label="Import Stream"
+          tooltip="Import from serial stream"
+          onClick={() => setOpenStream(true)}
+        />
+      </div>
+
+      <FileImportModal isOpen={openFile} onClose={() => setOpenFile(false)} />
+      <PointsImportModal
+        isOpen={openPoints}
+        onClose={() => setOpenPoints(false)}
       />
-      <IconButton
-        icon={<IconImport />}
-        label="Import Points"
-        tooltip="Import points (paste JSON or lines)"
-        onClick={() => setPointsOpen(true)}
+      <StreamImportModal
+        isOpen={openStream}
+        onClose={() => setOpenStream(false)}
       />
-
-      {demoOpen && (
-        <Modal title="Import File (Demo)" onClose={() => setDemoOpen(false)}>
-          <div className="mb-2">
-            Demo importer — wire real file parsing later.
-          </div>
-          <input type="file" className="mb-3" />
-          <div className="flex justify-end gap-2">
-            <button
-              className="px-3 py-1 rounded"
-              onClick={() => setDemoOpen(false)}
-            >
-              Close
-            </button>
-            <button
-              className="px-3 py-1 rounded bg-primary text-white"
-              onClick={() => {
-                alert("Demo: file import");
-                setDemoOpen(false);
-              }}
-            >
-              Import
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {pointsOpen && (
-        <Modal title="Import Points" onClose={() => setPointsOpen(false)}>
-          <div className="mb-2 text-sm text-gray-300">
-            Accepts two formats:
-            <ul className="list-disc ml-5">
-              <li>
-                JSON array of objects:{" "}
-                <code>
-                  [{"{"}"x":10,"y":20{"}"}]
-                </code>
-              </li>
-              <li>
-                Line-based: <code>x:20,y:20</code> or <code>20,20</code>
-              </li>
-            </ul>
-          </div>
-
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={8}
-            className="w-full p-2 bg-black/60 rounded text-sm"
-            placeholder='Paste points here... e.g.
-[
-  {"x":10,"y":20},
-  {"x":20,"y":30}
-]'
-          />
-
-          {error && <div className="text-red-400 mt-2">{error}</div>}
-
-          <div className="flex justify-end gap-2 mt-3">
-            <button
-              className="px-3 py-1 rounded"
-              onClick={() => setPointsOpen(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className="px-3 py-1 rounded bg-primary text-white"
-              onClick={onImportPoints}
-            >
-              Import points
-            </button>
-          </div>
-        </Modal>
-      )}
-    </div>
+    </>
   );
 }
