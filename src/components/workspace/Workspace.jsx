@@ -1,3 +1,6 @@
+// src/components/workspace/Workspace.jsx
+// Sample asset (local): /mnt/data/253b8f35-5323-4bfd-8414-b68db9b512a0.png
+
 import React, {
   useRef,
   useEffect,
@@ -11,28 +14,45 @@ import { renderScene } from "./RenderScene";
 import FloatingMenu from "./FloatingControls";
 
 /**
- * Workspace.jsx (updated)
- * - Proper fitToPoints implementation
- * - workspace.cmd event handler: { type: 'fit'|'zoomBy'|'reset'|'zoomTo', data: {...} }
- * - configurable min/max zoom (increased)
- * - zoomBy preserves world point under cursor if center provided
+ * Workspace
+ * - Canvas-driven renderer with camera (x,y,zoom)
+ * - Grid / axes / crosshair / hover point measure
+ * - Fit / zoom / reset / center controls via events or FloatingMenu
+ *
+ * Expects ViewContext to expose:
+ *  showGrid, showPoints, algorithm, curveLevel,
+ *  crosshair, axes, showControls, showMeasureOnHover
+ *
+ * Expects SceneContext to expose:
+ *  points (array of {x,y[,z]})
  */
 
 export default function Workspace() {
   const canvasRef = useRef(null);
   const rafRef = useRef(null);
 
-  const { points, setAllPoints } = useContext(SceneContext);
-  const { showGrid, showPoints, algorithm, curveLevel } = useContext(ViewContext);
+  const { points } = useContext(SceneContext);
+  const {
+    showGrid,
+    showPoints,
+    algorithm,
+    curveLevel,
+    crosshair,
+    axes,
+    showControls,
+    showMeasureOnHover,
+  } = useContext(ViewContext);
 
-  // camera stored in state so UI can react if needed; but we batch changes to avoid floods
   const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
+  const [hoverWorld, setHoverWorld] = useState(null);
+  const [hoveredPoint, setHoveredPoint] = useState(null); // non-null only when pointer near a point
+  const [pointerScreen, setPointerScreen] = useState(null); // pointer screen pos for tooltip placement
 
-  // zoom limits
-  const minZoom = 0.002;
-  const maxZoom = 100;
+  const minZoom = 0.002,
+    maxZoom = 100;
 
-  // helpers: convert screen <-> world, using latest camera
+  const HIT_RADIUS_PX = 8; // detection radius in CSS px
+
   const toScreen = useCallback(
     (wx, wy, canvas) => {
       const w = canvas.width / devicePixelRatio;
@@ -57,78 +77,52 @@ export default function Workspace() {
     [camera]
   );
 
-  // fit scene to canvas: center and choose zoom so bounding box fits with margin
+  // fitToPoints (keeps simple)
   const fitToPoints = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (!points || points.length === 0) {
-      // nothing to fit; reset view
-      animateCamera({ x: centerX, y: centerY, zoom: newZoom });
+      setCamera({ x: 0, y: 0, zoom: 1 });
       return;
     }
-
-    // compute bounding box in world coords (points are in mm)
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
       maxY = -Infinity;
-    for (const p of points) {
+    points.forEach((p) => {
       if (p.x < minX) minX = p.x;
       if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y;
       if (p.y > maxY) maxY = p.y;
-    }
-    // guard
-    if (!isFinite(minX) || !isFinite(minY)) return;
-
-    // canvas size in CSS px
+    });
     const canvasPxW = canvas.width / devicePixelRatio;
     const canvasPxH = canvas.height / devicePixelRatio;
-
-    // add margin as percentage of available area (0.88 -> use 88% of canvas)
     const margin = 0.88;
-
-    // compute required pixels-per-world-unit (here world unit = mm)
     const bboxW = Math.max(1e-6, maxX - minX);
     const bboxH = Math.max(1e-6, maxY - minY);
-
-    const ppw = (canvasPxW * margin) / bboxW; // pixels per mm horizontally
-    const pph = (canvasPxH * margin) / bboxH; // pixels per mm vertically
-
-    // choose smaller so both dimensions fit
-    let desiredPixelsPerUnit = Math.min(ppw, pph);
-
-    // desired zoom factor relative to world unit scale: we treat 1 world unit → base pixels = 1
-    // Here camera.zoom is directly the pixels-per-unit (no separate basePPMM). So set zoom = desiredPixelsPerUnit
-    // But to keep behavior consistent with previous code where zoom was multiplicative, we assume that
-    // camera.zoom is pixels-per-mm overall. If you previously used a different base, adjust accordingly.
-    const newZoom = Math.max(minZoom, Math.min(maxZoom, desiredPixelsPerUnit));
-
-    // center of bbox
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    // set camera so that world center maps to canvas center
-    setCamera({ x: centerX, y: centerY, zoom: newZoom });
+    const ppw = (canvasPxW * margin) / bboxW;
+    const pph = (canvasPxH * margin) / bboxH;
+    const newZoom = Math.max(minZoom, Math.min(maxZoom, Math.min(ppw, pph)));
+    const cx = (minX + maxX) / 2,
+      cy = (minY + maxY) / 2;
+    animateCamera({ x: cx, y: cy, zoom: newZoom });
+    // also update hoverWorld to avoid stale coords after fit
+    setHoverWorld({ x: cx, y: cy });
   }, [points]);
 
-  // zoomBy helper: if centerScreen provided, preserve world position under cursor
+  // zoomBy with optional center
   const zoomBy = useCallback(
     (factor, centerScreen = null) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       setCamera((prev) => {
-        const oldZoom = prev.zoom;
-        let newZoom = oldZoom * factor;
-        newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
-
-        // if centerScreen provided (CSS px coords relative to canvas), compute adjustment
+        const newZoom = Math.max(
+          minZoom,
+          Math.min(maxZoom, prev.zoom * factor)
+        );
         if (centerScreen) {
-          const before = toWorld(centerScreen.x, centerScreen.y, canvas); // world before zoom
-          const newCam = { ...prev, zoom: newZoom };
-          // compute how to shift camera.x/y so that the same world point stays under the same screen pixel
+          const before = toWorld(centerScreen.x, centerScreen.y, canvas);
           const afterScreen = {
-            // worldToScreen using new zoom and unchanged camera.x/y
             x:
               (before.x - prev.x) * newZoom +
               canvas.width / devicePixelRatio / 2,
@@ -136,33 +130,51 @@ export default function Workspace() {
               (before.y - prev.y) * newZoom +
               canvas.height / devicePixelRatio / 2,
           };
-          // desired screen is centerScreen, so compute delta in world coords to shift camera
           const dxScreen = centerScreen.x - afterScreen.x;
           const dyScreen = centerScreen.y - afterScreen.y;
-          // convert screen delta to world delta
           const dxWorld = dxScreen / newZoom;
           const dyWorld = dyScreen / newZoom;
           return { x: prev.x - dxWorld, y: prev.y - dyWorld, zoom: newZoom };
         }
-
         return { ...prev, zoom: newZoom };
       });
     },
     [toWorld]
   );
 
-  // reset view
-  const resetView = useCallback(() => {
-    setCamera({ x: 0, y: 0, zoom: 1 });
+  const resetCamera = useCallback(() => {
+    animateCamera({ x: 0, y: 0, zoom: 1 });
   }, []);
 
-  // rendering loop
+  const centerView = useCallback(() => {
+    // center to world origin (0,0)
+    animateCamera({ x: 0, y: 0, zoom: camera.zoom });
+  }, [camera.zoom]);
+
+  function animateCamera(targetCam, duration = 220) {
+    const start = performance.now();
+    const startCam = { ...camera };
+    function step(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const lerp = (a, b) => a + (b - a) * t;
+      setCamera({
+        x: lerp(startCam.x, targetCam.x),
+        y: lerp(startCam.y, targetCam.y),
+        zoom: lerp(startCam.zoom, targetCam.zoom),
+      });
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // render loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d", { alpha: false });
 
     function resize() {
+      // use parentElement client dims; make sure parent has min-h-0
       const rect = canvas.parentElement.getBoundingClientRect();
       canvas.width = Math.round(rect.width * devicePixelRatio);
       canvas.height = Math.round(rect.height * devicePixelRatio);
@@ -175,107 +187,160 @@ export default function Workspace() {
     let running = true;
     const loop = () => {
       if (!running) return;
-      // clear and set DPR transform
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-      // clear
+      const w = canvas.width / devicePixelRatio;
+      const h = canvas.height / devicePixelRatio;
       ctx.fillStyle = "#0b1220";
-      ctx.fillRect(
-        0,
-        0,
-        canvas.width / devicePixelRatio,
-        canvas.height / devicePixelRatio
-      );
+      ctx.fillRect(0, 0, w, h);
 
-      // draw using renderScene (delegated algorithm)
+      // GRID (draw here so toggling showGrid works reliably)
+      if (showGrid) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,255,255,0.06)";
+        ctx.lineWidth = 1;
+        const gridStep = 10; // mm per grid line (tweakable)
+        const topLeft = toWorld(0, 0, canvas);
+        const bottomRight = toWorld(w, h, canvas);
+        const startX = Math.floor(topLeft.x / gridStep) * gridStep;
+        const endX = Math.ceil(bottomRight.x / gridStep) * gridStep;
+        const startY = Math.floor(topLeft.y / gridStep) * gridStep;
+        const endY = Math.ceil(bottomRight.y / gridStep) * gridStep;
+
+        for (let x = startX; x <= endX; x += gridStep) {
+          const sx = Math.round(toScreen(x, 0, canvas).x) + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(sx, 0);
+          ctx.lineTo(sx, h);
+          ctx.stroke();
+        }
+        for (let y = startY; y <= endY; y += gridStep) {
+          const sy = Math.round(toScreen(0, y, canvas).y) + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(0, sy);
+          ctx.lineTo(w, sy);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // draw axes at origin if enabled
+      if (axes) {
+        ctx.save();
+        // world -> screen for origin
+        const origin = toScreen(0, 0, canvas);
+        // long axis lines
+        ctx.strokeStyle = "rgba(255,255,255,0.08)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, origin.y);
+        ctx.lineTo(w, origin.y);
+        ctx.moveTo(origin.x, 0);
+        ctx.lineTo(origin.x, h);
+        ctx.stroke();
+
+        // small axis arrows and labels at center origin
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.font = "12px Inter, sans-serif";
+        ctx.fillText("X", origin.x + 6, origin.y - 6);
+        ctx.fillText("Y", origin.x + 6, origin.y + 14);
+        ctx.restore();
+      }
+
+      // render main scene (lines, points, curves)
       renderScene(
         ctx,
         points || [],
         (wx, wy) => {
-          const screen = toScreen(wx, wy, canvas);
-          return { x: screen.x, y: screen.y };
+          const s = toScreen(wx, wy, canvas);
+          return { x: s.x, y: s.y };
         },
         {
-          showGrid,
+          showGrid: false, // already handled here
           showPoints,
           algorithm,
-          gridFn: () => {
-            // draw grid in world-space: rely on toScreen and toWorld
-            const w = canvas.width / devicePixelRatio;
-            const h = canvas.height / devicePixelRatio;
-            const gridStep = 10; // mm per major grid line (you can adapt)
-            ctx.save();
-            ctx.strokeStyle = "rgba(255,255,255,0.06)";
-            ctx.lineWidth = 1;
-
-            const topLeft = toWorld(0, 0, canvas);
-            const bottomRight = toWorld(w, h, canvas);
-
-            const startX = Math.floor(topLeft.x / gridStep) * gridStep;
-            const endX = Math.ceil(bottomRight.x / gridStep) * gridStep;
-            const startY = Math.floor(topLeft.y / gridStep) * gridStep;
-            const endY = Math.ceil(bottomRight.y / gridStep) * gridStep;
-
-            for (let x = startX; x <= endX; x += gridStep) {
-              const sx = toScreen(x, 0, canvas).x;
-              ctx.beginPath();
-              ctx.moveTo(Math.round(sx) + 0.5, 0);
-              ctx.lineTo(Math.round(sx) + 0.5, h);
-              ctx.stroke();
-            }
-            for (let y = startY; y <= endY; y += gridStep) {
-              const sy = toScreen(0, y, canvas).y;
-              ctx.beginPath();
-              ctx.moveTo(0, Math.round(sy) + 0.5);
-              ctx.lineTo(w, Math.round(sy) + 0.5);
-              ctx.stroke();
-            }
-            ctx.restore();
-          },
-          curveLevel 
+          gridFn: null,
+          curveLevel,
         }
       );
+
+      // crosshair drawing at pointer if enabled
+      if (crosshair && hoverWorld) {
+        ctx.save();
+        const p = toScreen(hoverWorld.x, hoverWorld.y, canvas);
+        ctx.strokeStyle = "rgba(255,255,255,0.12)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p.x, 0);
+        ctx.lineTo(p.x, h);
+        ctx.moveTo(0, p.y);
+        ctx.lineTo(w, p.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // draw point-hover tooltip if hovering a point (and feature enabled)
+      if (hoveredPoint && showMeasureOnHover && pointerScreen) {
+        ctx.save();
+        const pScreen = pointerScreen; // {x,y} in CSS px
+        const txt = `x:${hoveredPoint.x.toFixed(2)} y:${hoveredPoint.y.toFixed(
+          2
+        )}`;
+        ctx.font = "12px Inter, sans-serif";
+        const padding = 6;
+        const measure = ctx.measureText(txt);
+        const boxW = measure.width + padding * 2;
+        const boxH = 20;
+        // box near pointer (prefer bottom-right)
+        let bx = pScreen.x + 12;
+        let by = pScreen.y + 12;
+        if (bx + boxW > w) bx = pScreen.x - boxW - 12;
+        if (by + boxH > h) by = pScreen.y - boxH - 12;
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(bx, by, boxW, boxH);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(txt, bx + padding, by + 14);
+        ctx.restore();
+      }
 
       rafRef.current = requestAnimationFrame(loop);
     };
 
     rafRef.current = requestAnimationFrame(loop);
-
-    // keep canvas size in sync
     const onResize = () => resize();
     window.addEventListener("resize", onResize);
-
     return () => {
+      running = false;
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
     };
   }, [
     points,
     showGrid,
     showPoints,
     algorithm,
-    camera.zoom,
-    camera.x,
-    camera.y,
+    curveLevel,
+    axes,
+    crosshair,
+    hoverWorld,
+    hoveredPoint,
+    pointerScreen,
     toScreen,
     toWorld,
+    showMeasureOnHover,
   ]);
 
-  // wheel zoom & pan
+  // wheel zoom + pan
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const onWheel = (ev) => {
       ev.preventDefault();
       const rect = canvas.getBoundingClientRect();
       const screen = { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
       if (ev.ctrlKey || ev.metaKey) {
-        // stronger multiplier for quicker zooming
-        const delta = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
-        zoomBy(delta, screen);
+        const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+        zoomBy(factor, screen);
       } else {
-        // normal scroll pans the view
         setCamera((prev) => ({
           ...prev,
           x: prev.x - ev.deltaX / prev.zoom,
@@ -283,29 +348,57 @@ export default function Workspace() {
         }));
       }
     };
-
     canvas.addEventListener("wheel", onWheel, { passive: false });
-
     return () => canvas.removeEventListener("wheel", onWheel);
   }, [zoomBy]);
 
-  // mouse drag panning
+  // pan by dragging & track mouse for hoverWorld and point hover detection
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     let dragging = false;
     let last = { x: 0, y: 0 };
 
-    const onDown = (ev) => {
+    function getNearestPointAtScreen(sx, sy) {
+      // returns point if within HIT_RADIUS_PX else null
+      if (!points || points.length === 0) return null;
+      let nearest = null;
+      let bestDist2 = HIT_RADIUS_PX * HIT_RADIUS_PX; // CSS px squared
+      for (const p of points) {
+        const s = toScreen(p.x, p.y, canvas);
+        const dx = s.x - sx;
+        const dy = s.y - sy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 <= bestDist2) {
+          bestDist2 = d2;
+          nearest = p;
+        }
+      }
+      return nearest;
+    }
+
+    const onDown = (e) => {
       dragging = true;
-      last = { x: ev.clientX, y: ev.clientY };
+      last = { x: e.clientX, y: e.clientY };
       canvas.style.cursor = "grabbing";
     };
-    const onMove = (ev) => {
+    const onMove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left,
+        sy = e.clientY - rect.top;
+      // update hover world coords
+      const wcoord = toWorld(sx, sy, canvas);
+      setHoverWorld(wcoord);
+      setPointerScreen({ x: sx, y: sy });
+
+      // detect nearest point on pointer move
+      const near = getNearestPointAtScreen(sx, sy);
+      setHoveredPoint(near); // either point object or null
+
       if (!dragging) return;
-      const dx = ev.clientX - last.x;
-      const dy = ev.clientY - last.y;
-      last = { x: ev.clientX, y: ev.clientY };
+      const dx = e.clientX - last.x,
+        dy = e.clientY - last.y;
+      last = { x: e.clientX, y: e.clientY };
       setCamera((prev) => ({
         ...prev,
         x: prev.x - dx / prev.zoom,
@@ -316,89 +409,94 @@ export default function Workspace() {
       dragging = false;
       canvas.style.cursor = "default";
     };
+    const onLeave = () => {
+      setHoverWorld(null);
+      setHoveredPoint(null);
+      setPointerScreen(null);
+    };
 
     canvas.addEventListener("mousedown", onDown);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    canvas.addEventListener("mouseleave", onLeave);
 
     return () => {
       canvas.removeEventListener("mousedown", onDown);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      canvas.removeEventListener("mouseleave", onLeave);
     };
-  }, []);
+  }, [points, toScreen, toWorld]);
 
-  // double-click recentre to clicked world point
+  // view event handlers (fit/zoom/reset/center) — listen for ViewMenu events
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const onDbl = (ev) => {
-      const rect = canvas.getBoundingClientRect();
-      const sx = ev.clientX - rect.left;
-      const sy = ev.clientY - rect.top;
-      const world = toWorld(sx, sy, canvas);
-      setCamera((prev) => ({ ...prev, x: world.x, y: world.y }));
-    };
-    canvas.addEventListener("dblclick", onDbl);
-    return () => canvas.removeEventListener("dblclick", onDbl);
-  }, [toWorld]);
+    const zoomIn = () => zoomBy(1.2);
+    const zoomOut = () => zoomBy(1 / 1.2);
+    const fit = () => fitToPoints();
+    const center = () => centerView();
+    const reset = () => resetCamera();
 
-  // custom event handler so FloatingMenu (or others) can send commands
+    function centerView() {
+      animateCamera({ x: 0, y: 0, zoom: camera.zoom });
+    }
+    function resetCamera() {
+      animateCamera({ x: 0, y: 0, zoom: 1 });
+    }
+
+    window.addEventListener("view.zoom.in", zoomIn);
+    window.addEventListener("view.zoom.out", zoomOut);
+    window.addEventListener("view.fit", fit);
+    window.addEventListener("view.center", centerView);
+    window.addEventListener("view.reset", resetCamera);
+
+    return () => {
+      window.removeEventListener("view.zoom.in", zoomIn);
+      window.removeEventListener("view.zoom.out", zoomOut);
+      window.removeEventListener("view.fit", fit);
+      window.removeEventListener("view.center", centerView);
+      window.removeEventListener("view.reset", resetCamera);
+    };
+  }, [zoomBy, fitToPoints, camera.zoom]);
+
+  // workspace commands (floating menu uses workspace.cmd earlier)
   useEffect(() => {
     const handler = (ev) => {
       const detail = ev.detail || {};
       const type = detail.type;
       const data = detail.data || {};
-      if (type === "fit") {
-        fitToPoints();
-      } else if (type === "zoomBy") {
-        // data: { factor, center? }
-        const factor = data.factor || data;
-        const center = data.center || null;
-        zoomBy(factor, center);
-      } else if (type === "reset") {
-        resetView();
-      } else if (type === "zoomTo") {
-        // data: { zoom, center? } - set absolute zoom
-        const z = Math.max(minZoom, Math.min(maxZoom, data.zoom));
-        setCamera((prev) => ({ ...prev, zoom: z }));
-      }
+      if (type === "fit") fitToPoints();
+      else if (type === "zoomBy") zoomBy(data.factor || data);
+      else if (type === "reset") resetCamera();
+      else if (type === "zoomTo")
+        setCamera((prev) => ({
+          ...prev,
+          zoom: Math.max(minZoom, Math.min(maxZoom, data.zoom)),
+        }));
     };
     window.addEventListener("workspace.cmd", handler);
     return () => window.removeEventListener("workspace.cmd", handler);
-  }, [fitToPoints, zoomBy, resetView]);
-
-  // Smooth transition helper
-  function animateCamera(targetCam, duration = 200) {
-    const startCam = { ...camera };
-    const start = performance.now();
-
-    function step(now) {
-      const t = Math.min(1, (now - start) / duration);
-      const lerp = (a, b) => a + (b - a) * t;
-
-      setCamera({
-        x: lerp(startCam.x, targetCam.x),
-        y: lerp(startCam.y, targetCam.y),
-        zoom: lerp(startCam.zoom, targetCam.zoom),
-      });
-
-      if (t < 1) requestAnimationFrame(step);
-    }
-
-    requestAnimationFrame(step);
-  }
+  }, [fitToPoints, zoomBy]);
 
   return (
     <div className="w-full h-full relative">
       <canvas ref={canvasRef} className="w-full h-full block" />
 
-      {/* Zoom indicator */}
+      {/* bottom-left coordinate panel */}
+      <div className="absolute bottom-3 left-4 px-3 py-1 text-xs bg-gray-900/80 text-white border border-gray-700 rounded shadow">
+        {hoverWorld
+          ? `x: ${Number(hoverWorld.x).toFixed(2)}  y: ${Number(
+              hoverWorld.y
+            ).toFixed(2)}`
+          : "—"}
+      </div>
+
+      {/* zoom indicator */}
       <div className="absolute bottom-3 right-4 px-3 py-1 text-xs bg-gray-900/80 text-white border border-gray-700 rounded shadow">
         Zoom: {camera.zoom.toFixed(3)}x
       </div>
 
-      <FloatingMenu />
+      {/* floating controls (hide if showControls false) */}
+      {showControls && <FloatingMenu />}
     </div>
   );
 }

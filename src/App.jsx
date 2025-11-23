@@ -14,12 +14,14 @@ export default function App() {
     <AppProvider>
       <SettingsProvider>
         <SceneProvider>
-          <ViewProvider>   {/* <-- YOU MISSED THIS */}
+          <ViewProvider>
+            {" "}
+            {/* <-- YOU MISSED THIS */}
             <div className="flex flex-col h-screen">
               <TopBar />
               <RibbonMenu />
               <SubMenuPanel />
-              <div className="flex-1">
+              <div className="flex-1 min-h-0 flex flex-col">
                 <Workspace />
               </div>
             </div>

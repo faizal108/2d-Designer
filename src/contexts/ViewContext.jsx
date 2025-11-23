@@ -1,4 +1,5 @@
-import { createContext, useState, useEffect } from "react";
+// src/contexts/ViewContext.jsx
+import React, { createContext, useState, useEffect } from "react";
 import { getLocal, setLocal } from "../utils/storage";
 
 export const ViewContext = createContext();
@@ -11,16 +12,28 @@ export function ViewProvider({ children }) {
   const [algorithm, setAlgorithm] = useState(() =>
     getLocal("drawAlgo", "linear")
   );
-  // Smoothness level for curved lines
   const [curveLevel, setCurveLevel] = useState(() => getLocal("curveLevel", 1));
 
-  // linear | curved | compare
+  const [showMeasureOnHover, setShowMeasureOnHover] = useState(() =>
+    getLocal("showMeasureOnHover", true)
+  );
+
+  // new flags
+  const [crosshair, setCrosshair] = useState(() =>
+    getLocal("crosshair", false)
+  );
+  const [axes, setAxes] = useState(() => getLocal("axes", true));
+  const [showControls, setShowControls] = useState(() =>
+    getLocal("showControls", true)
+  );
+
   useEffect(() => setLocal("showGrid", showGrid), [showGrid]);
   useEffect(() => setLocal("showPoints", showPoints), [showPoints]);
   useEffect(() => setLocal("drawAlgo", algorithm), [algorithm]);
-
-  // Smoothness level for curved lines
   useEffect(() => setLocal("curveLevel", curveLevel), [curveLevel]);
+  useEffect(() => setLocal("crosshair", crosshair), [crosshair]);
+  useEffect(() => setLocal("axes", axes), [axes]);
+  useEffect(() => setLocal("showControls", showControls), [showControls]);
 
   return (
     <ViewContext.Provider
@@ -32,7 +45,15 @@ export function ViewProvider({ children }) {
         algorithm,
         setAlgorithm,
         curveLevel,
-        setCurveLevel
+        setCurveLevel,
+        crosshair,
+        setCrosshair,
+        axes,
+        setAxes,
+        showControls,
+        setShowControls,
+        showMeasureOnHover,
+        setShowMeasureOnHover,
       }}
     >
       {children}
