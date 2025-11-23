@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { exportCanvasAsPNG } from "../../utils/export/exportImage";
+import { exportCanvasAsPNG } from "../../../utils/export/exportImage";
 
 export default function ExportImageModal({ isOpen, onClose }) {
   const [fileName, setFileName] = useState("drawing");

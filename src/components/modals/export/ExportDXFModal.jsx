@@ -1,7 +1,7 @@
 import React, { useState, useContext } from "react";
-import { SceneContext } from "../../contexts/SceneContext";
-import { generateDXF } from "../../utils/export/exportDXF";
-import { downloadText } from "../../utils/download";
+import { SceneContext } from "../../../contexts/SceneContext";
+import { generateDXF } from "../../../utils/export/exportDXF";
+import { downloadText } from "../../../utils/download";
 
 export default function ExportDXFModal({ isOpen, onClose }) {
   const { points } = useContext(SceneContext);

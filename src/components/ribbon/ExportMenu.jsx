@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import IconButton from "../ui/IconButton";
-import ExportDXFModal from "../modals/ExportDXFModal";
-import ExportImageModal from "../modals/ExportImageModal";
+import ExportDXFModal from "../modals/export/ExportDXFModal";
+import ExportImageModal from "../modals/export/ExportImageModal";
 
 const IconExport = () => (
   <svg className="w-5 h-5" viewBox="0 0 24 24" stroke="currentColor">
