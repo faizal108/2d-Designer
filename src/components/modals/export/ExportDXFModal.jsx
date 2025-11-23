@@ -9,6 +9,8 @@ export default function ExportDXFModal({ isOpen, onClose }) {
   const [fileName, setFileName] = useState("drawing");
   const [version, setVersion] = useState("AC1021"); // Default 2013
 
+  const [compat, setCompat] = useState("lwp"); // "lwp" or "legacy"
+
   if (!isOpen) return null;
 
   const DXF_VERSIONS = [
@@ -24,7 +26,7 @@ export default function ExportDXFModal({ isOpen, onClose }) {
       return;
     }
 
-    const dxf = generateDXF(points, { version });
+    const dxf = generateDXF(points, { compat, versionLabel: version });
     downloadText(`${fileName}.dxf`, dxf);
     onClose();
   };
@@ -33,7 +35,6 @@ export default function ExportDXFModal({ isOpen, onClose }) {
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999]">
       <div className="bg-surface p-6 rounded-xl w-96 border border-gray-700 shadow-xl">
         <h2 className="text-lg font-semibold mb-4">Export DXF</h2>
-
         {/* Filename */}
         <label className="text-sm">File Name</label>
         <input
@@ -41,7 +42,6 @@ export default function ExportDXFModal({ isOpen, onClose }) {
           value={fileName}
           onChange={(e) => setFileName(e.target.value)}
         />
-
         {/* DXF version */}
         <label className="text-sm">DXF Version</label>
         <select
@@ -54,6 +54,19 @@ export default function ExportDXFModal({ isOpen, onClose }) {
               {v.label} ({v.value})
             </option>
           ))}
+        </select>
+
+        {/* in the modal body, add: */}
+        <label className="text-sm">Compatibility</label>
+        <select
+          value={compat}
+          onChange={(e) => setCompat(e.target.value)}
+          className="w-full bg-gray-800 border rounded p-2 mb-4"
+        >
+          <option value="lwp">AutoCAD 2013+ (LWPOLYLINE, compact)</option>
+          <option value="legacy">
+            AutoCAD 2004 / Legacy (POLYLINE + VERTEX)
+          </option>
         </select>
 
         <div className="flex justify-end gap-3">
