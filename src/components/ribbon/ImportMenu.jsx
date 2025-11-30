@@ -41,7 +41,9 @@ export default function ImportMenu() {
           icon={<IconImport />}
           label="Import Stream"
           tooltip="Import from serial stream"
-          onClick={() => setOpenStream(true)}
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("stream.open"));
+          }}
         />
       </div>
 

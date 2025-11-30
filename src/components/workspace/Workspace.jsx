@@ -1,5 +1,4 @@
 // src/components/workspace/Workspace.jsx
-// Sample asset (local): /mnt/data/253b8f35-5323-4bfd-8414-b68db9b512a0.png
 
 import React, {
   useRef,
@@ -12,20 +11,7 @@ import { SceneContext } from "../../contexts/SceneContext";
 import { ViewContext } from "../../contexts/ViewContext";
 import { renderScene } from "./RenderScene";
 import FloatingMenu from "./FloatingControls";
-
-/**
- * Workspace
- * - Canvas-driven renderer with camera (x,y,zoom)
- * - Grid / axes / crosshair / hover point measure
- * - Fit / zoom / reset / center controls via events or FloatingMenu
- *
- * Expects ViewContext to expose:
- *  showGrid, showPoints, algorithm, curveLevel,
- *  crosshair, axes, showControls, showMeasureOnHover
- *
- * Expects SceneContext to expose:
- *  points (array of {x,y[,z]})
- */
+import SerialStreamPanel from "./SerialStreamPanel";
 
 export default function Workspace() {
   const canvasRef = useRef(null);
@@ -45,14 +31,15 @@ export default function Workspace() {
 
   const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
   const [hoverWorld, setHoverWorld] = useState(null);
-  const [hoveredPoint, setHoveredPoint] = useState(null); // non-null only when pointer near a point
-  const [pointerScreen, setPointerScreen] = useState(null); // pointer screen pos for tooltip placement
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+  const [pointerScreen, setPointerScreen] = useState(null);
+  const [showStreamPanel, setShowStreamPanel] = useState(false);
 
-  const minZoom = 0.002,
-    maxZoom = 100;
+  const minZoom = 0.002;
+  const maxZoom = 100;
+  const HIT_RADIUS_PX = 8;
 
-  const HIT_RADIUS_PX = 8; // detection radius in CSS px
-
+  // --------- camera transforms ---------
   const toScreen = useCallback(
     (wx, wy, canvas) => {
       const w = canvas.width / devicePixelRatio;
@@ -77,7 +64,25 @@ export default function Workspace() {
     [camera]
   );
 
-  // fitToPoints (keeps simple)
+  const animateCamera = useCallback(
+    (targetCam, duration = 220) => {
+      const start = performance.now();
+      const startCam = { ...camera };
+      function step(now) {
+        const t = Math.min(1, (now - start) / duration);
+        const lerp = (a, b) => a + (b - a) * t;
+        setCamera({
+          x: lerp(startCam.x, targetCam.x),
+          y: lerp(startCam.y, targetCam.y),
+          zoom: lerp(startCam.zoom, targetCam.zoom),
+        });
+        if (t < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    },
+    [camera]
+  );
+
   const fitToPoints = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -85,16 +90,18 @@ export default function Workspace() {
       setCamera({ x: 0, y: 0, zoom: 1 });
       return;
     }
+
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
       maxY = -Infinity;
-    points.forEach((p) => {
+    for (const p of points) {
       if (p.x < minX) minX = p.x;
       if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y;
       if (p.y > maxY) maxY = p.y;
-    });
+    }
+
     const canvasPxW = canvas.width / devicePixelRatio;
     const canvasPxH = canvas.height / devicePixelRatio;
     const margin = 0.88;
@@ -103,14 +110,13 @@ export default function Workspace() {
     const ppw = (canvasPxW * margin) / bboxW;
     const pph = (canvasPxH * margin) / bboxH;
     const newZoom = Math.max(minZoom, Math.min(maxZoom, Math.min(ppw, pph)));
-    const cx = (minX + maxX) / 2,
-      cy = (minY + maxY) / 2;
-    animateCamera({ x: cx, y: cy, zoom: newZoom });
-    // also update hoverWorld to avoid stale coords after fit
-    setHoverWorld({ x: cx, y: cy });
-  }, [points]);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
 
-  // zoomBy with optional center
+    animateCamera({ x: cx, y: cy, zoom: newZoom });
+    setHoverWorld({ x: cx, y: cy });
+  }, [points, animateCamera]);
+
   const zoomBy = useCallback(
     (factor, centerScreen = null) => {
       const canvas = canvasRef.current;
@@ -144,37 +150,19 @@ export default function Workspace() {
 
   const resetCamera = useCallback(() => {
     animateCamera({ x: 0, y: 0, zoom: 1 });
-  }, []);
+  }, [animateCamera]);
 
   const centerView = useCallback(() => {
-    // center to world origin (0,0)
     animateCamera({ x: 0, y: 0, zoom: camera.zoom });
-  }, [camera.zoom]);
+  }, [camera.zoom, animateCamera]);
 
-  function animateCamera(targetCam, duration = 220) {
-    const start = performance.now();
-    const startCam = { ...camera };
-    function step(now) {
-      const t = Math.min(1, (now - start) / duration);
-      const lerp = (a, b) => a + (b - a) * t;
-      setCamera({
-        x: lerp(startCam.x, targetCam.x),
-        y: lerp(startCam.y, targetCam.y),
-        zoom: lerp(startCam.zoom, targetCam.zoom),
-      });
-      if (t < 1) requestAnimationFrame(step);
-    }
-    requestAnimationFrame(step);
-  }
-
-  // render loop
+  // --------- render loop ---------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d", { alpha: false });
 
     function resize() {
-      // use parentElement client dims; make sure parent has min-h-0
       const rect = canvas.parentElement.getBoundingClientRect();
       canvas.width = Math.round(rect.width * devicePixelRatio);
       canvas.height = Math.round(rect.height * devicePixelRatio);
@@ -193,19 +181,18 @@ export default function Workspace() {
       ctx.fillStyle = "#0b1220";
       ctx.fillRect(0, 0, w, h);
 
-      // GRID (draw here so toggling showGrid works reliably)
+      // grid
       if (showGrid) {
         ctx.save();
         ctx.strokeStyle = "rgba(255,255,255,0.06)";
         ctx.lineWidth = 1;
-        const gridStep = 10; // mm per grid line (tweakable)
+        const gridStep = 10;
         const topLeft = toWorld(0, 0, canvas);
         const bottomRight = toWorld(w, h, canvas);
         const startX = Math.floor(topLeft.x / gridStep) * gridStep;
         const endX = Math.ceil(bottomRight.x / gridStep) * gridStep;
         const startY = Math.floor(topLeft.y / gridStep) * gridStep;
         const endY = Math.ceil(bottomRight.y / gridStep) * gridStep;
-
         for (let x = startX; x <= endX; x += gridStep) {
           const sx = Math.round(toScreen(x, 0, canvas).x) + 0.5;
           ctx.beginPath();
@@ -223,12 +210,10 @@ export default function Workspace() {
         ctx.restore();
       }
 
-      // draw axes at origin if enabled
+      // axes
       if (axes) {
         ctx.save();
-        // world -> screen for origin
         const origin = toScreen(0, 0, canvas);
-        // long axis lines
         ctx.strokeStyle = "rgba(255,255,255,0.08)";
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -238,7 +223,6 @@ export default function Workspace() {
         ctx.lineTo(origin.x, h);
         ctx.stroke();
 
-        // small axis arrows and labels at center origin
         ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.font = "12px Inter, sans-serif";
         ctx.fillText("X", origin.x + 6, origin.y - 6);
@@ -246,7 +230,7 @@ export default function Workspace() {
         ctx.restore();
       }
 
-      // render main scene (lines, points, curves)
+      // main scene
       renderScene(
         ctx,
         points || [],
@@ -255,7 +239,7 @@ export default function Workspace() {
           return { x: s.x, y: s.y };
         },
         {
-          showGrid: false, // already handled here
+          showGrid: false,
           showPoints,
           algorithm,
           gridFn: null,
@@ -263,7 +247,7 @@ export default function Workspace() {
         }
       );
 
-      // crosshair drawing at pointer if enabled
+      // crosshair
       if (crosshair && hoverWorld) {
         ctx.save();
         const p = toScreen(hoverWorld.x, hoverWorld.y, canvas);
@@ -273,24 +257,23 @@ export default function Workspace() {
         ctx.moveTo(p.x, 0);
         ctx.lineTo(p.x, h);
         ctx.moveTo(0, p.y);
-        ctx.lineTo(w, p.y);
+        ctx.lineTo(0 + w, p.y);
         ctx.stroke();
         ctx.restore();
       }
 
-      // draw point-hover tooltip if hovering a point (and feature enabled)
+      // hover point tooltip
       if (hoveredPoint && showMeasureOnHover && pointerScreen) {
         ctx.save();
-        const pScreen = pointerScreen; // {x,y} in CSS px
-        const txt = `x:${hoveredPoint.x.toFixed(2)} y:${hoveredPoint.y.toFixed(
+        const pScreen = pointerScreen;
+        const txt = `x:${hoveredPoint.x.toFixed(
           2
-        )}`;
+        )} y:${hoveredPoint.y.toFixed(2)}`;
         ctx.font = "12px Inter, sans-serif";
         const padding = 6;
         const measure = ctx.measureText(txt);
         const boxW = measure.width + padding * 2;
         const boxH = 20;
-        // box near pointer (prefer bottom-right)
         let bx = pScreen.x + 12;
         let by = pScreen.y + 12;
         if (bx + boxW > w) bx = pScreen.x - boxW - 12;
@@ -309,9 +292,10 @@ export default function Workspace() {
     const onResize = () => resize();
     window.addEventListener("resize", onResize);
     return () => {
-      running = false;
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      running = false;
     };
   }, [
     points,
@@ -352,7 +336,7 @@ export default function Workspace() {
     return () => canvas.removeEventListener("wheel", onWheel);
   }, [zoomBy]);
 
-  // pan by dragging & track mouse for hoverWorld and point hover detection
+  // drag pan + hover detection
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -360,10 +344,9 @@ export default function Workspace() {
     let last = { x: 0, y: 0 };
 
     function getNearestPointAtScreen(sx, sy) {
-      // returns point if within HIT_RADIUS_PX else null
       if (!points || points.length === 0) return null;
       let nearest = null;
-      let bestDist2 = HIT_RADIUS_PX * HIT_RADIUS_PX; // CSS px squared
+      let bestDist2 = HIT_RADIUS_PX * HIT_RADIUS_PX;
       for (const p of points) {
         const s = toScreen(p.x, p.y, canvas);
         const dx = s.x - sx;
@@ -384,20 +367,18 @@ export default function Workspace() {
     };
     const onMove = (e) => {
       const rect = canvas.getBoundingClientRect();
-      const sx = e.clientX - rect.left,
-        sy = e.clientY - rect.top;
-      // update hover world coords
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
       const wcoord = toWorld(sx, sy, canvas);
       setHoverWorld(wcoord);
       setPointerScreen({ x: sx, y: sy });
 
-      // detect nearest point on pointer move
       const near = getNearestPointAtScreen(sx, sy);
-      setHoveredPoint(near); // either point object or null
+      setHoveredPoint(near);
 
       if (!dragging) return;
-      const dx = e.clientX - last.x,
-        dy = e.clientY - last.y;
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
       last = { x: e.clientX, y: e.clientY };
       setCamera((prev) => ({
         ...prev,
@@ -428,7 +409,7 @@ export default function Workspace() {
     };
   }, [points, toScreen, toWorld]);
 
-  // view event handlers (fit/zoom/reset/center) — listen for ViewMenu events
+  // view menu events
   useEffect(() => {
     const zoomIn = () => zoomBy(1.2);
     const zoomOut = () => zoomBy(1 / 1.2);
@@ -436,29 +417,22 @@ export default function Workspace() {
     const center = () => centerView();
     const reset = () => resetCamera();
 
-    function centerView() {
-      animateCamera({ x: 0, y: 0, zoom: camera.zoom });
-    }
-    function resetCamera() {
-      animateCamera({ x: 0, y: 0, zoom: 1 });
-    }
-
     window.addEventListener("view.zoom.in", zoomIn);
     window.addEventListener("view.zoom.out", zoomOut);
     window.addEventListener("view.fit", fit);
-    window.addEventListener("view.center", centerView);
-    window.addEventListener("view.reset", resetCamera);
+    window.addEventListener("view.center", center);
+    window.addEventListener("view.reset", reset);
 
     return () => {
       window.removeEventListener("view.zoom.in", zoomIn);
       window.removeEventListener("view.zoom.out", zoomOut);
       window.removeEventListener("view.fit", fit);
-      window.removeEventListener("view.center", centerView);
-      window.removeEventListener("view.reset", resetCamera);
+      window.removeEventListener("view.center", center);
+      window.removeEventListener("view.reset", reset);
     };
-  }, [zoomBy, fitToPoints, camera.zoom]);
+  }, [zoomBy, fitToPoints, centerView, resetCamera]);
 
-  // workspace commands (floating menu uses workspace.cmd earlier)
+  // workspace.cmd from floating menu
   useEffect(() => {
     const handler = (ev) => {
       const detail = ev.detail || {};
@@ -467,15 +441,27 @@ export default function Workspace() {
       if (type === "fit") fitToPoints();
       else if (type === "zoomBy") zoomBy(data.factor || data);
       else if (type === "reset") resetCamera();
-      else if (type === "zoomTo")
+      else if (type === "zoomTo") {
         setCamera((prev) => ({
           ...prev,
           zoom: Math.max(minZoom, Math.min(maxZoom, data.zoom)),
         }));
+      }
     };
     window.addEventListener("workspace.cmd", handler);
     return () => window.removeEventListener("workspace.cmd", handler);
-  }, [fitToPoints, zoomBy]);
+  }, [fitToPoints, zoomBy, resetCamera]);
+
+  // open stream panel when Import menu fires event
+  const { setAllPoints } = useContext(SceneContext);
+  useEffect(() => {
+    const onOpenStream = () => {
+      setAllPoints([]); // new blank scene
+      setShowStreamPanel(true);
+    };
+    window.addEventListener("stream.open", onOpenStream);
+    return () => window.removeEventListener("stream.open", onOpenStream);
+  }, [setAllPoints]);
 
   return (
     <div className="w-full h-full relative">
@@ -495,7 +481,12 @@ export default function Workspace() {
         Zoom: {camera.zoom.toFixed(3)}x
       </div>
 
-      {/* floating controls (hide if showControls false) */}
+      {/* Serial sidebar */}
+      {showStreamPanel && (
+        <SerialStreamPanel onClose={() => setShowStreamPanel(false)} />
+      )}
+
+      {/* floating controls */}
       {showControls && <FloatingMenu />}
     </div>
   );
