@@ -16,6 +16,7 @@ export default function SerialStreamPanel({ onClose }) {
   const [statusText, setStatusText] = useState("Idle");
   const [lastPosition, setLastPosition] = useState(null); // {x,y} mm
 
+  const lastFlushRef = useRef(performance.now());
   const readerRef = useRef(null);
   const keepReadingRef = useRef(false);
   const textBufferRef = useRef("");
@@ -119,21 +120,24 @@ export default function SerialStreamPanel({ onClose }) {
       const [xs, ys] = trimmed.split(",");
       const x_cm = parseFloat(xs);
       const y_cm = parseFloat(ys);
-      if (!isFinite(x_cm) || !isFinite(y_cm)) return;
 
-      // cm → mm: 10cm => 100mm
+      // cm → mm
       const p = { x: x_cm * 10, y: y_cm * 10 };
 
-      // use ref so the async reader sees latest recording state
       if (isRecordingRef.current) {
         batchRef.current.push(p);
-        if (batchRef.current.length >= BATCH_SIZE) {
+
+        const now = performance.now();
+        if (
+          batchRef.current.length >= BATCH_SIZE ||
+          now - lastFlushRef.current > 40 // 🔴 THIS IS THE KEY LINE
+        ) {
           const batch = batchRef.current.splice(0, batchRef.current.length);
-          addPoints(batch);
+          lastFlushRef.current = now;
+          addPoints(batch); // 🔴 LIVE UPDATE HAPPENS HERE
         }
       }
 
-      // always keep last position up to date
       setLastPosition({ x: p.x, y: p.y });
       return;
     }
@@ -151,8 +155,8 @@ export default function SerialStreamPanel({ onClose }) {
       const mx = trimmed.match(/X\s*=\s*([-0-9.]+)/i);
       const my = trimmed.match(/Y\s*=\s*([-0-9.]+)/i);
       if (mx && my) {
-        const x = parseFloat(mx[1]);
-        const y = parseFloat(my[1]);
+        const x = parseFloat(mx[1]) * 10;
+        const y = parseFloat(my[1]) * 10;
         if (isFinite(x) && isFinite(y)) {
           setLastPosition({ x, y });
 
